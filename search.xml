@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search>
+  <entry>
+    <title>spring注解工具类</title>
+    <url>/2020/03/18/spring%E6%B3%A8%E8%A7%A3%E5%B7%A5%E5%85%B7%E7%B1%BB/</url>
+    <content><![CDATA[<blockquote>
+<p>最近用到自定义的注解需要使用到注解实例中值继承和根据注解查找bean,直接使用spring的工具来实现我的需求.在这里做个笔记.</p>
+</blockquote>
+<h2 id="需求"><a href="#需求" class="headerlink" title="需求"></a>需求</h2><p>有两种注解类,一个是Consumer暂称父注解,一个是<code>OrderConsumer</code>暂称子注解.<code>OrderConsumer</code>被<code>Consumer</code>注解.扫描的时候需要把被这两种注解的bean都找出来然后根据<code>isOrderly()</code>分别进行注册.</p>
+<figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="meta">@Retention</span>(RetentionPolicy.RUNTIME)</span><br><span class="line"><span class="meta">@Target</span>(&#123;ElementType.TYPE&#125;)</span><br><span class="line"><span class="meta">@Component</span></span><br><span class="line"><span class="meta">@Documented</span></span><br><span class="line"><span class="keyword">public</span> <span class="meta">@interface</span> Consumer &#123;</span><br><span class="line">    <span class="comment">/**</span></span><br><span class="line"><span class="comment">     * 消费者指定主题</span></span><br><span class="line"><span class="comment">     * <span class="doctag">@return</span></span></span><br><span class="line"><span class="comment">     */</span></span><br><span class="line">    <span class="function">String <span class="title">topic</span><span class="params">()</span> <span class="keyword">default</span> "unknown"</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">/**</span></span><br><span class="line"><span class="comment">     * 是否顺序消费者</span></span><br><span class="line"><span class="comment">     * <span class="doctag">@return</span></span></span><br><span class="line"><span class="comment">     */</span></span><br><span class="line">    <span class="function"><span class="keyword">boolean</span> <span class="title">isOrderly</span><span class="params">()</span> <span class="keyword">default</span> <span class="keyword">false</span></span>;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="meta">@Retention</span>(RetentionPolicy.RUNTIME)</span><br><span class="line"><span class="meta">@Target</span>(&#123;ElementType.TYPE&#125;)</span><br><span class="line"><span class="meta">@Consumer</span></span><br><span class="line"><span class="meta">@Documented</span></span><br><span class="line"><span class="keyword">public</span> <span class="meta">@interface</span> OrderConsumer &#123;</span><br><span class="line">    <span class="comment">/**</span></span><br><span class="line"><span class="comment">     * 消费者指定主题</span></span><br><span class="line"><span class="comment">     *</span></span><br><span class="line"><span class="comment">     * <span class="doctag">@return</span></span></span><br><span class="line"><span class="comment">     */</span></span><br><span class="line">    <span class="meta">@AliasFor</span>(annotation = Consumer<span class="class">.<span class="keyword">class</span>, <span class="title">attribute</span> </span>= <span class="string">"topic"</span>)</span><br><span class="line">    <span class="function">String <span class="title">topic</span><span class="params">()</span> <span class="keyword">default</span> "unknown"</span>;</span><br><span class="line"></span><br><span class="line">    <span class="comment">/**</span></span><br><span class="line"><span class="comment">     * 是否顺序消费者</span></span><br><span class="line"><span class="comment">     * <span class="doctag">@return</span></span></span><br><span class="line"><span class="comment">     */</span></span><br><span class="line">    <span class="meta">@AliasFor</span>(annotation = Consumer<span class="class">.<span class="keyword">class</span>, <span class="title">attribute</span> </span>= <span class="string">"isOrderly"</span>)</span><br><span class="line">    <span class="function"><span class="keyword">boolean</span> <span class="title">isOrderly</span><span class="params">()</span> <span class="keyword">default</span> <span class="keyword">true</span></span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<a id="more"></a>
+
+<h2 id="spring扫描后得到的bean列表获取注解属性"><a href="#spring扫描后得到的bean列表获取注解属性" class="headerlink" title="spring扫描后得到的bean列表获取注解属性"></a>spring扫描后得到的bean列表获取注解属性</h2><blockquote>
+<p>根据bean的注解实例做不同的事情,直接上代码</p>
+</blockquote>
+<figure class="highlight java"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onApplicationEvent</span><span class="params">(ApplicationStartedEvent event)</span> </span>&#123;</span><br><span class="line">    GenericApplicationContext context = (GenericApplicationContext) event.getApplicationContext();</span><br><span class="line">    Map&lt;String, IMQConsumer&gt; beans = context.getBeansOfType(IMQConsumer<span class="class">.<span class="keyword">class</span>)</span>;</span><br><span class="line"></span><br><span class="line">    log.info(<span class="string">"[Consumer] size : &#123;&#125;"</span>, beans.size());</span><br><span class="line">    <span class="keyword">for</span> (Map.Entry&lt;String, IMQConsumer&gt; entry : beans.entrySet()) &#123;</span><br><span class="line">        <span class="keyword">try</span> &#123;</span><br><span class="line">            IMQConsumer consumer = entry.getValue();</span><br><span class="line">            Consumer annotation = AnnotatedElementUtils.getMergedAnnotation(consumer.getClass(), Consumer<span class="class">.<span class="keyword">class</span>)</span>;</span><br><span class="line">            String topic = annotation.topic();</span><br><span class="line">            <span class="keyword">boolean</span> isOrderly = annotation.isOrderly();</span><br><span class="line">            <span class="comment">// do something ......</span></span><br><span class="line">            log.info(<span class="string">"[TOPIC] ADD CONSUMER[Orderly:&#123;&#125;]: &#123;&#125;"</span>, isOrderly, consumer.getClass().getSimpleName());</span><br><span class="line">        &#125; <span class="keyword">catch</span> (Exception e) &#123;</span><br><span class="line">            e.printStackTrace();</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>代码比较简单,从上下文中获取指定接口的bean,然后用<code>AnnotatedElementUtils.getMergedAnnotation</code>获取Merged后的注解实例,得到它的属性值,然后根据属性值做不同的事情</p>
+]]></content>
+      <categories>
+        <category>spring</category>
+      </categories>
+      <tags>
+        <tag>java</tag>
+        <tag>spring</tag>
+        <tag>AnnotationUtils</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>travis-cli的SSH-KEY</title>
+    <url>/2020/02/20/travis-cli%E7%9A%84SSH-KEY/</url>
+    <content><![CDATA[<h2 id="记录自己的HEXO发布方式"><a href="#记录自己的HEXO发布方式" class="headerlink" title="记录自己的HEXO发布方式"></a>记录自己的HEXO发布方式</h2><p>仓库配置文件有比较多密码和密钥,之前是使用travis-cli的provider(GitHub Pages),但是它只支持同个仓库的分支发布到分支,整个项目是publish的我没找到GITHUP有分支查看权限.所以改用一个private仓库触发travis-cli构建部署到自己的GitHub Pages仓库,隐藏项目配置文件.</p>
+<a id="more"></a>
+
+<h2 id="travis构建配置"><a href="#travis构建配置" class="headerlink" title="travis构建配置"></a>travis构建配置</h2><figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="attr">sudo:</span> <span class="literal">false</span></span><br><span class="line"><span class="attr">language:</span> <span class="string">node_js</span></span><br><span class="line"><span class="attr">node_js:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="number">10</span> <span class="comment"># use nodejs v10 LTS</span></span><br><span class="line"><span class="attr">cache:</span> <span class="string">npm</span></span><br><span class="line"><span class="attr">branches:</span></span><br><span class="line">  <span class="attr">only:</span></span><br><span class="line">    <span class="bullet">-</span> <span class="string">master</span> <span class="comment"># build master branch only</span></span><br><span class="line"><span class="attr">script:</span></span><br><span class="line">  <span class="bullet">-</span> <span class="string">hexo</span> <span class="string">g;hexo</span> <span class="string">deploy</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="配置travis的SSH-KEY"><a href="#配置travis的SSH-KEY" class="headerlink" title="配置travis的SSH-KEY"></a>配置travis的SSH-KEY</h2><p>命令行发布hexo项目的时候是需要使用SSH-KEY来进行githup的鉴权的.这部分内容网络上到处都是了.如果是在travis触发的构建发布就少了在服务器上建密钥去GITHUP登记的步骤,travis分配的机器应该是完全干净的虚拟机,我看见网络上有使用<code>travis encrypt-file</code>来做的比较繁琐,travis-cli目前在项目的配置中已经提供了这个功能,我们看下怎么配置.<a href="!https://docs.travis-ci.com/user/private-dependencies/#deploy-key">官方文档</a></p>
+<p>找到项目配置</p>
+<img src="/2020/02/20/travis-cli%E7%9A%84SSH-KEY/p1.png" class="">
+
+<p>在这个框填入~/.ssh/id_rsa.pub的内容,保存搞定.</p>
+<img src="/2020/02/20/travis-cli%E7%9A%84SSH-KEY/p2.png" class="">
+
+<p>是不是简单多了.</p>
+]]></content>
+      <categories>
+        <category>ssh</category>
+        <category>deploy</category>
+      </categories>
+      <tags>
+        <tag>deploy</tag>
+        <tag>travis</tag>
+        <tag>ssh-key</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>给谷歌VM换ip</title>
+    <url>/2020/02/02/%E7%BB%99%E8%B0%B7%E6%AD%8CVM%E6%8D%A2ip/</url>
+    <content><![CDATA[<h2 id="google-Cloud的IP失效"><a href="#google-Cloud的IP失效" class="headerlink" title="google Cloud的IP失效"></a>google Cloud的IP失效</h2><p>今天建在谷歌的服务器不能用了,看了下ip失效了.怎么办能看看能不能换ip吧!记录一下备用.</p>
+<ul>
+<li>打开VM控制台记住下自己的地区<img src="/2020/02/02/%E7%BB%99%E8%B0%B7%E6%AD%8CVM%E6%8D%A2ip/1.jpeg" class=""></li>
+<li>打开<code>VPC网络</code>的<code>外部IP地址</code>菜单<a id="more"></a>
+<img src="/2020/02/02/%E7%BB%99%E8%B0%B7%E6%AD%8CVM%E6%8D%A2ip/2.jpeg" class=""></li>
+<li>点击新建一个<code>保留静态地址</code>,如果<code>附加目标</code>能选到你要的VM就选(你的VM已经和旧IP解绑),如果选不到就继续下个步骤(你的VM和旧IP还绑着)<img src="/2020/02/02/%E7%BB%99%E8%B0%B7%E6%AD%8CVM%E6%8D%A2ip/3.jpeg" class=""></li>
+<li>然后点击这个新的<code>静态地址</code>后面的<code>更改</code>,选择你要绑定的VM就大功告成了.旧的地址你可以释放掉<img src="/2020/02/02/%E7%BB%99%E8%B0%B7%E6%AD%8CVM%E6%8D%A2ip/4.jpeg" class="">
+
+</li>
+</ul>
+<h2 id="问题"><a href="#问题" class="headerlink" title="问题"></a>问题</h2><p>我原来的ip是临时ip,应该是重启VM后会改变的.而且我的IP配额是1.按照上面的步骤做完后我的静态IP是无法关联到被临时IP绑定的VM,没关系在提供类型下拉功能中把临时IP改成静态然后它会报错,这样旧IP和VM会自动脱离绑定关系,然后点击新IP的更改进行VM绑定就可以了.旧IP过不久自己也会释放.</p>
+]]></content>
+      <categories>
+        <category>google</category>
+        <category>google Cloud</category>
+      </categories>
+      <tags>
+        <tag>google</tag>
+        <tag>vm</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>chromedp调用chromedp/docker-headless</title>
+    <url>/2020/01/20/chromedp%E8%B0%83%E7%94%A8chromedp-docker-headless/</url>
+    <content><![CDATA[<h2 id="启动自己build的docker-images"><a href="#启动自己build的docker-images" class="headerlink" title="启动自己build的docker images"></a>启动自己build的docker images</h2><p>在我的<a href="/2020/01/19/build-docker-images-for-chromedp/" title="build docker images for chromedp">build docker images for chromedp</a>有介绍如何构建自己的 <code>chromedp/headless-shell</code> 镜像,按部就班.这时候可以在docker实例的启动日志中看到ws的协议地址.但是url种的token是动态的在chromedp中是需要明确指出这个地址的,这怎么办?官方早就为你准备好了获取渠道,只要你请求 <code>http://127.0.0.1:9222/json/version</code> 这个restapi它就会返回你需要的信息.返回如下,关键的内容你一看就知道了.</p>
+<a id="more"></a>
+<figure class="highlight json"><table><tr><td class="code"><pre><span class="line">&#123;</span><br><span class="line">   <span class="attr">"Browser"</span>: <span class="string">"Chrome/79.0.3945.130"</span>,</span><br><span class="line">   <span class="attr">"Protocol-Version"</span>: <span class="string">"1.3"</span>,</span><br><span class="line">   <span class="attr">"User-Agent"</span>: <span class="string">"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36"</span>,</span><br><span class="line">   <span class="attr">"V8-Version"</span>: <span class="string">"7.9.317.33"</span>,</span><br><span class="line">   <span class="attr">"WebKit-Version"</span>: <span class="string">"537.36 (@e22de67c28798d98833a7137c0e22876237fc40a)"</span>,</span><br><span class="line">   <span class="attr">"webSocketDebuggerUrl"</span>: <span class="string">"ws://127.0.0.1:9222/devtools/browser/50809f38-dadf-4e01-a3f5-3e8f58998923"</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="话不多说完整代码"><a href="#话不多说完整代码" class="headerlink" title="话不多说完整代码"></a>话不多说完整代码</h2><p>我写了一个本地工具包 <code>github.com/chromedp/examples/util</code> 这个需要在 <code>go.mod</code> 中配置一条 <code>replace github.com/chromedp/examples/util =&gt; ./shi/remote/util</code> 本地依赖其他直接即可运行.</p>
+<blockquote>
+<p>辅助函数</p>
+</blockquote>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">package</span> util</span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> (</span><br><span class="line">    <span class="string">"encoding/json"</span></span><br><span class="line">    <span class="string">"fmt"</span></span><br><span class="line">    <span class="string">"io/ioutil"</span></span><br><span class="line">    <span class="string">"log"</span></span><br><span class="line">    <span class="string">"net"</span></span><br><span class="line">    <span class="string">"net/http"</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="comment">// CDPwsINFO chromedp's service info</span></span><br><span class="line"><span class="keyword">type</span> CDPwsINFO <span class="keyword">struct</span> &#123;</span><br><span class="line">    Browser              <span class="keyword">string</span> <span class="string">`json:"Browser"`</span></span><br><span class="line">    ProtocolVersion      <span class="keyword">string</span> <span class="string">`json:"Protocol-Version"`</span></span><br><span class="line">    UserAgent            <span class="keyword">string</span> <span class="string">`json:"User-Agent"`</span></span><br><span class="line">    V8Version            <span class="keyword">string</span> <span class="string">`json:"V8-Version"`</span></span><br><span class="line">    WebKitVersion        <span class="keyword">string</span> <span class="string">`json:"WebKit-Version"`</span></span><br><span class="line">    WebSocketDebuggerURL <span class="keyword">string</span> <span class="string">`json:"webSocketDebuggerUrl"`</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// GetNativeIP get local ip</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">GetNativeIP</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">    <span class="keyword">var</span> ip <span class="keyword">string</span></span><br><span class="line">    addrs, err := net.InterfaceAddrs()</span><br><span class="line">    <span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> <span class="string">"127.0.0.1"</span></span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">for</span> _, address := <span class="keyword">range</span> addrs &#123;</span><br><span class="line">        <span class="comment">// 检查ip地址判断是否回环地址</span></span><br><span class="line">        <span class="keyword">if</span> ipnet, ok := address.(*net.IPNet); ok &amp;&amp; !ipnet.IP.IsLoopback() &#123;</span><br><span class="line">            <span class="keyword">if</span> ipnet.IP.To4() != <span class="literal">nil</span> &#123;</span><br><span class="line">                ip = ipnet.IP.String()</span><br><span class="line">                log.Println(<span class="string">"ip4: "</span> + ip)</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> ip</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// GetWSDebuggerURL get token from chromedp browser url</span></span><br><span class="line"><span class="comment">// http://127.0.0.1:9222/json/version</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">GetWSDebuggerURL</span><span class="params">(port <span class="keyword">int</span>)</span> <span class="title">CDPwsINFO</span></span> &#123;</span><br><span class="line">    resp, err := http.Get(fmt.Sprintf(<span class="string">"http://%s:%d/json/version"</span>, GetNativeIP(), port))</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">        log.Println(err)</span><br><span class="line">        <span class="keyword">return</span> CDPwsINFO&#123;&#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">defer</span> resp.Body.Close()</span><br><span class="line"></span><br><span class="line">    body, err := ioutil.ReadAll(resp.Body)</span><br><span class="line">    res := <span class="keyword">string</span>(body)</span><br><span class="line">    ststuscode := resp.StatusCode</span><br><span class="line">    log.Println(res)</span><br><span class="line">    log.Println(ststuscode)</span><br><span class="line">    <span class="keyword">var</span> wsinfo CDPwsINFO</span><br><span class="line">    <span class="keyword">if</span> ststuscode == <span class="number">200</span> &#123;</span><br><span class="line">        json.Unmarshal(body, &amp;wsinfo)</span><br><span class="line">    &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> CDPwsINFO&#123;&#125;</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> wsinfo</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<blockquote>
+<p>主程序</p>
+</blockquote>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">package</span> main</span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> (</span><br><span class="line">    <span class="string">"context"</span></span><br><span class="line">    <span class="string">"flag"</span></span><br><span class="line">    <span class="string">"io/ioutil"</span></span><br><span class="line">    <span class="string">"log"</span></span><br><span class="line"></span><br><span class="line">    <span class="string">"github.com/chromedp/chromedp"</span></span><br><span class="line">    <span class="string">"github.com/chromedp/examples/util"</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line"></span><br><span class="line">    wsinfo := util.GetWSDebuggerURL(<span class="number">9222</span>)</span><br><span class="line">    url := wsinfo.WebSocketDebuggerURL</span><br><span class="line">    <span class="keyword">var</span> devToolWsURL <span class="keyword">string</span></span><br><span class="line">    flag.StringVar(&amp;devToolWsURL, <span class="string">"devtools-ws-url"</span>, url, <span class="string">"DevTools Websocket URL"</span>)</span><br><span class="line">    flag.Parse()</span><br><span class="line"></span><br><span class="line">    actxt, cancelActxt := chromedp.NewRemoteAllocator(context.Background(), devToolWsURL)</span><br><span class="line">    <span class="keyword">defer</span> cancelActxt()</span><br><span class="line"></span><br><span class="line">    ctx, cancelCtxt := chromedp.NewContext(actxt) <span class="comment">// create new tab</span></span><br><span class="line">    <span class="keyword">defer</span> cancelCtxt()                            <span class="comment">// close tab afterwards</span></span><br><span class="line"></span><br><span class="line">    <span class="keyword">var</span> attr <span class="keyword">map</span>[<span class="keyword">string</span>]<span class="keyword">string</span></span><br><span class="line">    <span class="keyword">var</span> buf []<span class="keyword">byte</span></span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> err := chromedp.Run(ctx,</span><br><span class="line">        chromedp.Navigate(<span class="string">"https://www.sina.com"</span>),</span><br><span class="line">        chromedp.EmulateViewport(<span class="number">1920</span>, <span class="number">1080</span>),</span><br><span class="line">        chromedp.Screenshot(<span class="string">`document.querySelector("body")`</span>, &amp;buf, chromedp.NodeVisible, chromedp.ByJSPath),</span><br><span class="line">    ); err != <span class="literal">nil</span> &#123;</span><br><span class="line">        log.Fatalf(<span class="string">"Failed : %v"</span>, err)</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> err := ioutil.WriteFile(<span class="string">"qrcode.png"</span>, buf, <span class="number">0644</span>); err != <span class="literal">nil</span> &#123;</span><br><span class="line">        log.Fatal(err)</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    log.Println(attr)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="遇到的问题"><a href="#遇到的问题" class="headerlink" title="遇到的问题"></a>遇到的问题</h2><ul>
+<li>不熟悉<code>go moudle</code>的本地包用法,抛出异常.解决办法就是 在go.mod中配置replace解决,还报错就是你建的包违反了go的规则找不到</li>
+</ul>
+<figure class="highlight shell"><table><tr><td class="code"><pre><span class="line">go: parsing go.mod: open github.com/chromedp/examples/util/go.mod: no such file or directory</span><br><span class="line">go: error loading module requirements</span><br></pre></td></tr></table></figure>
+]]></content>
+      <categories>
+        <category>go</category>
+        <category>chromedp</category>
+        <category>docker</category>
+      </categories>
+      <tags>
+        <tag>golang</tag>
+        <tag>go</tag>
+        <tag>chromedp/headless-shell</tag>
+        <tag>chromedp</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>build docker images for chromedp</title>
+    <url>/2020/01/19/build-docker-images-for-chromedp/</url>
+    <content><![CDATA[<h2 id="基于官方的chromedp-headless-shell制作自己的镜像"><a href="#基于官方的chromedp-headless-shell制作自己的镜像" class="headerlink" title="基于官方的chromedp/headless-shell制作自己的镜像"></a>基于官方的chromedp/headless-shell制作自己的镜像</h2><ol>
+<li><p>查看官方镜像的 <a href="https://github.com/chromedp/docker-headless-shell/blob/master/Dockerfile" target="_blank" rel="noopener">Dockerfile</a> 内容</p>
+</li>
+<li><p>编写自己的Dockerfile</p>
+</li>
+</ol>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">FROM</span> chromedp/headless-<span class="keyword">shell</span><span class="bash">:latest</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">WORKDIR</span><span class="bash"> /usr/share/fonts</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># install 文泉驿微米黑 font</span></span><br><span class="line"><span class="keyword">RUN</span><span class="bash">  apt-get update \</span></span><br><span class="line"><span class="bash">        &amp;&amp; apt-get install -y ttf-wqy-microhei \</span></span><br><span class="line"><span class="bash">        &amp;&amp; <span class="built_in">fc</span>-cache \</span></span><br><span class="line"><span class="bash">        &amp;&amp; <span class="built_in">fc</span>-list</span></span><br></pre></td></tr></table></figure>
+<a id="more"></a>
+<blockquote>
+<p>执行<code>docker build -t yourname/cdp:1.0 .</code></p>
+</blockquote>
+<figure class="highlight plain"><table><tr><td class="code"><pre><span class="line">shish@192  ~&#x2F;work&#x2F;sm&#x2F;compose&#x2F;my&#x2F;chrome  docker build -t shawnshi&#x2F;cdp:1.0 .</span><br><span class="line">Sending build context to Docker daemon  3.072kB</span><br><span class="line">Step 1&#x2F;3 : FROM chromedp&#x2F;headless-shell:latest</span><br><span class="line"> ---&gt; eb08fdffcf42</span><br><span class="line">Step 2&#x2F;3 : WORKDIR &#x2F;usr&#x2F;share&#x2F;fonts</span><br><span class="line"> ---&gt; Using cache</span><br><span class="line"> ---&gt; 70d78dd7d8b8</span><br><span class="line">Step 3&#x2F;3 : RUN  apt-get update         &amp;&amp; apt-get install -y ttf-wqy-microhei         &amp;&amp; fc-cache         &amp;&amp; fc-list</span><br><span class="line"> ---&gt; Running in aa7733989c30</span><br><span class="line">Get:2 http:&#x2F;&#x2F;deb.debian.org&#x2F;debian stable InRelease [122 kB]</span><br><span class="line">Get:1 http:&#x2F;&#x2F;security-cdn.debian.org&#x2F;debian-security stable&#x2F;updates InRelease [65.4 kB]</span><br><span class="line">Get:3 http:&#x2F;&#x2F;security-cdn.debian.org&#x2F;debian-security stable&#x2F;updates&#x2F;main amd64 Packages [171 kB]</span><br><span class="line">Get:4 http:&#x2F;&#x2F;deb.debian.org&#x2F;debian stable-updates InRelease [49.3 kB]</span><br><span class="line">Get:5 http:&#x2F;&#x2F;deb.debian.org&#x2F;debian stable&#x2F;main amd64 Packages [7908 kB]</span><br><span class="line">Get:6 http:&#x2F;&#x2F;deb.debian.org&#x2F;debian stable-updates&#x2F;main amd64 Packages [5792 B]</span><br><span class="line">Fetched 8321 kB in 1min 18s (107 kB&#x2F;s)</span><br><span class="line">Reading package lists...</span><br><span class="line">Reading package lists...</span><br><span class="line">Building dependency tree...</span><br><span class="line">Reading state information...</span><br><span class="line">The following additional packages will be installed:</span><br><span class="line">  fontconfig</span><br><span class="line">The following NEW packages will be installed:</span><br><span class="line">  fontconfig fonts-wqy-microhei</span><br><span class="line">0 upgraded, 2 newly installed, 0 to remove and 0 not upgraded.</span><br><span class="line">Need to get 2011 kB of archives.</span><br><span class="line">After this operation, 5847 kB of additional disk space will be used.</span><br><span class="line">Get:1 http:&#x2F;&#x2F;deb.debian.org&#x2F;debian stable&#x2F;main amd64 fontconfig amd64 2.13.1-2 [405 kB]</span><br><span class="line">Get:2 http:&#x2F;&#x2F;deb.debian.org&#x2F;debian stable&#x2F;main amd64 fonts-wqy-microhei all 0.2.0-beta-3 [1605 kB]</span><br><span class="line">debconf: delaying package configuration, since apt-utils is not installed</span><br><span class="line">Fetched 2011 kB in 4s (515 kB&#x2F;s)</span><br><span class="line">Selecting previously unselected package fontconfig.</span><br><span class="line">(Reading database ... 6675 files and directories currently installed.)</span><br><span class="line">Preparing to unpack ...&#x2F;fontconfig_2.13.1-2_amd64.deb ...</span><br><span class="line">Unpacking fontconfig (2.13.1-2) ...</span><br><span class="line">Selecting previously unselected package fonts-wqy-microhei.</span><br><span class="line">Preparing to unpack ...&#x2F;fonts-wqy-microhei_0.2.0-beta-3_all.deb ...</span><br><span class="line">Unpacking fonts-wqy-microhei (0.2.0-beta-3) ...</span><br><span class="line">Setting up fontconfig (2.13.1-2) ...</span><br><span class="line">Regenerating fonts cache... done.</span><br><span class="line">Setting up fonts-wqy-microhei (0.2.0-beta-3) ...</span><br><span class="line">&#x2F;usr&#x2F;share&#x2F;fonts&#x2F;truetype&#x2F;dejavu&#x2F;DejaVuSerif-Bold.ttf: DejaVu Serif:style&#x3D;Bold</span><br><span class="line">&#x2F;usr&#x2F;share&#x2F;fonts&#x2F;truetype&#x2F;dejavu&#x2F;DejaVuSansMono.ttf: DejaVu Sans Mono:style&#x3D;Book</span><br><span class="line">&#x2F;usr&#x2F;share&#x2F;fonts&#x2F;truetype&#x2F;dejavu&#x2F;DejaVuSans.ttf: DejaVu Sans:style&#x3D;Book</span><br><span class="line">&#x2F;usr&#x2F;share&#x2F;fonts&#x2F;truetype&#x2F;wqy&#x2F;wqy-microhei.ttc: WenQuanYi Micro Hei,文泉驛微米黑,文泉驿微米黑:style&#x3D;Regular</span><br><span class="line">&#x2F;usr&#x2F;share&#x2F;fonts&#x2F;truetype&#x2F;dejavu&#x2F;DejaVuSans-Bold.ttf: DejaVu Sans:style&#x3D;Bold</span><br><span class="line">&#x2F;usr&#x2F;share&#x2F;fonts&#x2F;truetype&#x2F;dejavu&#x2F;DejaVuSansMono-Bold.ttf: DejaVu Sans Mono:style&#x3D;Bold</span><br><span class="line">&#x2F;usr&#x2F;share&#x2F;fonts&#x2F;truetype&#x2F;wqy&#x2F;wqy-microhei.ttc: WenQuanYi Micro Hei Mono,文泉驛等寬微米黑,文泉驿等宽微米黑:style&#x3D;Regular</span><br><span class="line">&#x2F;usr&#x2F;share&#x2F;fonts&#x2F;truetype&#x2F;dejavu&#x2F;DejaVuSerif.ttf: DejaVu Serif:style&#x3D;Book</span><br><span class="line">Removing intermediate container aa7733989c30</span><br><span class="line"> ---&gt; a7834ff45ae9</span><br><span class="line">Successfully built a7834ff45ae9</span><br><span class="line">Successfully tagged shawnshi&#x2F;cdp:1.0</span><br></pre></td></tr></table></figure>
+
+<ol>
+<li>编写docker-compose.yml</li>
+</ol>
+<figure class="highlight yml"><table><tr><td class="code"><pre><span class="line"><span class="attr">version:</span> <span class="string">'3.1'</span></span><br><span class="line"></span><br><span class="line"><span class="attr">services:</span></span><br><span class="line">  <span class="attr">cdp:</span></span><br><span class="line">    <span class="attr">container_name:</span> <span class="string">cdp</span></span><br><span class="line">    <span class="attr">image:</span> <span class="string">shawnshi:cdp</span></span><br><span class="line">    <span class="attr">privileged:</span> <span class="literal">true</span></span><br><span class="line">    <span class="attr">cap_add:</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">SYS_PTRACE</span></span><br><span class="line">    <span class="attr">ports:</span></span><br><span class="line">      <span class="bullet">-</span> <span class="number">9222</span><span class="string">:9222</span></span><br><span class="line">    <span class="attr">entrypoint:</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">/headless-shell/headless-shell</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">--no-sandbox</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">--headless</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">--disable-gpu</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">--remote-debugging-address=0.0.0.0</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">--remote-debugging-port=9222</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">https://www.baidu.com/</span></span><br></pre></td></tr></table></figure>
+
+<ol start="4">
+<li>启动docker-compose up ,打开<code>http://127.0.0.1:9222/</code> 看到中文百度</li>
+</ol>
+]]></content>
+      <categories>
+        <category>go</category>
+        <category>chromedp</category>
+        <category>docker</category>
+      </categories>
+      <tags>
+        <tag>golang</tag>
+        <tag>go</tag>
+        <tag>chromedp/headless-shell</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>debug golang by VSCode</title>
+    <url>/2020/01/19/debug-golang/</url>
+    <content><![CDATA[<h2 id="vscode-go的调试"><a href="#vscode-go的调试" class="headerlink" title="vscode go的调试"></a>vscode go的调试</h2><p>安装 delve</p>
+<p><code>$ go get -u github.com/go-delve/delve/cmd/dlv</code></p>
+<h2 id="设置-launch-json-配置文件"><a href="#设置-launch-json-配置文件" class="headerlink" title="设置 launch.json 配置文件"></a>设置 launch.json 配置文件</h2><figure class="highlight json"><table><tr><td class="code"><pre><span class="line">&#123;</span><br><span class="line">    <span class="attr">"version"</span>: <span class="string">"0.2.0"</span>,</span><br><span class="line">    <span class="attr">"configurations"</span>: [</span><br><span class="line">        &#123;</span><br><span class="line">            <span class="attr">"name"</span>: <span class="string">"Launch"</span>,</span><br><span class="line">            <span class="attr">"type"</span>: <span class="string">"go"</span>,</span><br><span class="line">            <span class="attr">"request"</span>: <span class="string">"launch"</span>,</span><br><span class="line">            <span class="attr">"mode"</span>: <span class="string">"auto"</span>,</span><br><span class="line">            <span class="attr">"program"</span>: <span class="string">"$&#123;fileDirname&#125;"</span>,</span><br><span class="line">            <span class="attr">"env"</span>: &#123;&#125;,</span><br><span class="line">            <span class="attr">"args"</span>: []</span><br><span class="line">        &#125;</span><br><span class="line">    ]</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>常见属性如下</p>
+<a id="more"></a>
+<table>
+<thead>
+<tr>
+<th align="left">属性</th>
+<th align="left">描述</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="left">name</td>
+<td align="left">调试界面下拉选择项的名称</td>
+</tr>
+<tr>
+<td align="left">type</td>
+<td align="left">设置为go无需改动，是 vs code 用于计算调试代码需要用哪个扩展</td>
+</tr>
+<tr>
+<td align="left">mode</td>
+<td align="left">可以设置为 auto, debug, remote, test, exec 中的一个</td>
+</tr>
+<tr>
+<td align="left">program</td>
+<td align="left">调试程序的路径（绝对路径）</td>
+</tr>
+<tr>
+<td align="left">env</td>
+<td align="left">调试时使用的环境变量。例如:{ “ENVNAME”: “ENVVALUE” }</td>
+</tr>
+<tr>
+<td align="left">envFile</td>
+<td align="left">包含环境变量文件的绝对路径，在 env 中设置的属性会覆盖 envFile</td>
+</tr>
+<tr>
+<td align="left">args</td>
+<td align="left">传给正在调试程序命令行参数数组</td>
+</tr>
+<tr>
+<td align="left">showLog</td>
+<td align="left">布尔值，是否将调试信息输出</td>
+</tr>
+<tr>
+<td align="left">logOutput</td>
+<td align="left">配置调试输出的组件（debugger, gdbwire, lldbout, debuglineerr, rpc）,使用,分隔， showLog 设置为 true 时，此项配置生效</td>
+</tr>
+<tr>
+<td align="left">buildFlags</td>
+<td align="left">构建 go 程序时传给 go 编译器的标志</td>
+</tr>
+<tr>
+<td align="left">remotePath</td>
+<td align="left">远程调试程序的绝对路径，当 mode 设置为 remote 时有效</td>
+</tr>
+</tbody></table>
+<h2 id="配置中可以使用的VSCode变量"><a href="#配置中可以使用的VSCode变量" class="headerlink" title="配置中可以使用的VSCode变量"></a>配置中可以使用的VSCode变量</h2><ul>
+<li>${workspaceFolder} 调试 VS Code 打开工作空间的根目录下的所有文件</li>
+<li>${file} 调试当前文件</li>
+<li>${fileDirname} 调试当前文件所在目录下的所有文件</li>
+</ul>
+<h2 id="遇到的问题"><a href="#遇到的问题" class="headerlink" title="遇到的问题"></a>遇到的问题</h2><h3 id="执行调试的时候错误描述"><a href="#执行调试的时候错误描述" class="headerlink" title="执行调试的时候错误描述"></a>执行调试的时候错误描述</h3><blockquote>
+<p>could not launch process: debugserver or lldb-server not found: install XCode’s command line tools or lldb-server</p>
+</blockquote>
+<h3 id="解决"><a href="#解决" class="headerlink" title="解决:"></a>解决:</h3><p>打开「终端」，输入：<code>xcode-select --install</code>,如果安装失败就去 <a href="https://developer.apple.com/download/more/" target="_blank" rel="noopener">官网</a> 找<code>Command Line Tools for Xcode</code>安装</p>
+]]></content>
+      <categories>
+        <category>go</category>
+        <category>debug</category>
+      </categories>
+      <tags>
+        <tag>golang</tag>
+        <tag>go</tag>
+        <tag>debug</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>chrome centos7 install</title>
+    <url>/2020/01/17/chrome-centos7-install/</url>
+    <content><![CDATA[<h2 id="centos7-安装-chrome-headless"><a href="#centos7-安装-chrome-headless" class="headerlink" title="centos7 安装 chrome headless"></a>centos7 安装 chrome headless</h2><p>最近研究chromedp,想用chrome启动headless模式长期运行,chromedp使用NewRemoteAllocator进行远程链接.</p>
+<blockquote>
+<p>看下cenos7如何安装chrome</p>
+</blockquote>
+<ul>
+<li>配置yum源</li>
+</ul>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">cd /etc/yum.repos.d/</span><br><span class="line">vi google-chrome.repo</span><br></pre></td></tr></table></figure>
+
+<p>将下面内容写入文件</p>
+<figure class="highlight ini"><table><tr><td class="code"><pre><span class="line"><span class="section">[google-chrome]</span></span><br><span class="line"><span class="attr">name</span>=google-chrome</span><br><span class="line"><span class="attr">baseurl</span>=http://dl.google.com/linux/chrome/rpm/stable/<span class="variable">$basearch</span></span><br><span class="line"><span class="attr">enabled</span>=<span class="number">1</span></span><br><span class="line"><span class="attr">gpgcheck</span>=<span class="number">1</span></span><br><span class="line"><span class="attr">gpgkey</span>=https://dl-ssl.google.com/linux/linux_signing_key.pub</span><br></pre></td></tr></table></figure>
+<a id="more"></a>
+<ul>
+<li>安装</li>
+</ul>
+<figure class="highlight ini"><table><tr><td class="code"><pre><span class="line">yum -y install google-chrome-stable --nogpgcheck</span><br><span class="line"><span class="section">[root@localhost ~]</span><span class="comment"># google-chrome -version</span></span><br><span class="line">Google Chrome 79.0.3945.130 </span><br><span class="line"><span class="section">[root@localhost ~]</span><span class="comment">#</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="安装中文字体"><a href="#安装中文字体" class="headerlink" title="安装中文字体"></a>安装中文字体</h2><p>CentOs都不带中文字体,chrome打开中文网站的时候都是乱码,所以我们要把常用的字体文件安装到系统种.</p>
+<ul>
+<li>安装一下用到的软件<br>yum -y install fontconfig ttmkfdir</li>
+<li>建立目录 /usr/share/fonts/chinese,把字体文件拷贝到这里.不会找字体就去Windows系统C:/Windows/Fonts目录下复制出来.</li>
+<li>修改权限<br>chmod -R 755 /usr/share/fonts/chinese</li>
+<li>运行命令<br>ttmkfdir -e /usr/share/X11/fonts/encodings/encodings.dir</li>
+<li>修改配置 vi /etc/fonts/fonts.conf<br>加入<code>&lt;dir&gt;/usr/share/fonts/chinese/&lt;/dir&gt;</code>这行,最终内容片段类似如下:</li>
+</ul>
+<figure class="highlight xml"><table><tr><td class="code"><pre><span class="line"><span class="comment">&lt;!-- Font directory list --&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">dir</span>&gt;</span>/usr/share/fonts<span class="tag">&lt;/<span class="name">dir</span>&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">dir</span>&gt;</span>/usr/share/fonts/chinese/<span class="tag">&lt;/<span class="name">dir</span>&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">dir</span>&gt;</span>/usr/share/X11/fonts/Type1<span class="tag">&lt;/<span class="name">dir</span>&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">dir</span>&gt;</span>/usr/share/X11/fonts/TTF<span class="tag">&lt;/<span class="name">dir</span>&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">dir</span>&gt;</span>/usr/local/share/fonts<span class="tag">&lt;/<span class="name">dir</span>&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">dir</span> <span class="attr">prefix</span>=<span class="string">"xdg"</span>&gt;</span>fonts<span class="tag">&lt;/<span class="name">dir</span>&gt;</span></span><br><span class="line">    <span class="comment">&lt;!-- the following element will be removed in the future --&gt;</span></span><br><span class="line">    <span class="tag">&lt;<span class="name">dir</span>&gt;</span>~/.fonts<span class="tag">&lt;/<span class="name">dir</span>&gt;</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li>运行fc-cache,刷新</li>
+<li>执行fc-list 检查结果</li>
+</ul>
+<hr>
+<p>chrome运行检查<br><code>google-chrome --no-sandbox --headless --disable-gpu --screenshot https://www.suning.com/</code><br>把图片下载到本机打开看下是否是苏宁主页,并且没有中文乱码.</p>
+]]></content>
+      <categories>
+        <category>chrome</category>
+      </categories>
+      <tags>
+        <tag>chrome</tag>
+        <tag>chromedp</tag>
+        <tag>headless</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>golang context</title>
+    <url>/2020/01/16/golang-context/</url>
+    <content><![CDATA[<p>最近看到chromedp的golang使用教程,看到例子中有用到context不明白是干嘛用的,于是搜索了下api和别人的例子总结了下它的使用.</p>
+<h2 id="1-用处"><a href="#1-用处" class="headerlink" title="1.用处"></a>1.用处</h2><p>Context是干嘛用的呢?在golang中有一种控制并发的方式,一种是WaitGroup还有一种就是Context.</p>
+<blockquote>
+<p>我们来看下WaitGroup的例子</p>
+</blockquote>
+<a id="more"></a>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">    <span class="keyword">var</span> wg sync.WaitGroup</span><br><span class="line"></span><br><span class="line">    wg.Add(<span class="number">2</span>)</span><br><span class="line">    <span class="keyword">go</span> <span class="function"><span class="keyword">func</span><span class="params">()</span></span> &#123;</span><br><span class="line">        time.Sleep(<span class="number">2</span>*time.Second)</span><br><span class="line">        fmt.Println(<span class="string">"1完成"</span>)</span><br><span class="line">        wg.Done()</span><br><span class="line">    &#125;()</span><br><span class="line">    <span class="keyword">go</span> <span class="function"><span class="keyword">func</span><span class="params">()</span></span> &#123;</span><br><span class="line">        time.Sleep(<span class="number">2</span>*time.Second)</span><br><span class="line">        fmt.Println(<span class="string">"2完成"</span>)</span><br><span class="line">        wg.Done()</span><br><span class="line">    &#125;()</span><br><span class="line">    wg.Wait()</span><br><span class="line">    fmt.Println(<span class="string">"完工"</span>)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>很简单定义一个WaitGroup,并且指定有需要执行的goroutine数量是2,开始执行2个goroutine,等待执行完.这个功能有点像java的CountDownLatch类功能.</p>
+<p>这种方式有一个缺点是一旦运行就停不下来了,如果有bug那有可能就是无限执行,当然你可以在执行逻辑里面使用一个外部变量来表示状态,当需要退出的时候改变这个变量的状态就可以了.</p>
+<blockquote>
+<p>使用chan + select来解决无法控制goroutine的问题</p>
+</blockquote>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">    stop := <span class="built_in">make</span>(<span class="keyword">chan</span> <span class="keyword">bool</span>)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">go</span> <span class="function"><span class="keyword">func</span><span class="params">()</span></span> &#123;</span><br><span class="line">        <span class="keyword">for</span> &#123;</span><br><span class="line">            <span class="keyword">select</span> &#123;</span><br><span class="line">            <span class="keyword">case</span> &lt;-stop:</span><br><span class="line">                fmt.Println(<span class="string">"外部发来信号,停止循环..."</span>)</span><br><span class="line">                <span class="keyword">return</span></span><br><span class="line">            <span class="keyword">default</span>:</span><br><span class="line">                fmt.Println(<span class="string">"goroutine运行中..."</span>)</span><br><span class="line">                time.Sleep(<span class="number">2</span> * time.Second)</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;()</span><br><span class="line"></span><br><span class="line">    time.Sleep(<span class="number">10</span> * time.Second)</span><br><span class="line">    fmt.Println(<span class="string">"通知goroutine停止"</span>)</span><br><span class="line">    stop&lt;- <span class="literal">true</span></span><br><span class="line">    <span class="comment">//为了检测监控过是否停止，如果没有输出，就表示停止了</span></span><br><span class="line">    time.Sleep(<span class="number">5</span> * time.Second)</span><br><span class="line"></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这种方式就比较的优雅了,你有几个逻辑就分的比较清楚.但是它也有解决不了的场景,比如:有很多的goroutine要执行,goroutine里面又嵌套了goroutine.这时候你就需要定义很多的chan来控制goroutine的退出,不仅代码复杂度上升,而且逻辑关系混乱不容易看清你代码的意图.</p>
+<blockquote>
+<p>Context出场解决多goroutine的控制问题</p>
+</blockquote>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">    ctx, cancel := context.WithCancel(context.Background())</span><br><span class="line">    <span class="keyword">go</span> <span class="function"><span class="keyword">func</span><span class="params">(ctx context.Context)</span></span> &#123;</span><br><span class="line">        <span class="keyword">for</span> &#123;</span><br><span class="line">            <span class="keyword">select</span> &#123;</span><br><span class="line">            <span class="keyword">case</span> &lt;-ctx.Done():</span><br><span class="line">                fmt.Println(<span class="string">"外部发来信号,停止循环..."</span>)</span><br><span class="line">                <span class="keyword">return</span></span><br><span class="line">            <span class="keyword">default</span>:</span><br><span class="line">                fmt.Println(<span class="string">"goroutine运行中..."</span>)</span><br><span class="line">                time.Sleep(<span class="number">2</span> * time.Second)</span><br><span class="line">            &#125;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;(ctx)</span><br><span class="line"></span><br><span class="line">    time.Sleep(<span class="number">10</span> * time.Second)</span><br><span class="line">    fmt.Println(<span class="string">"通知goroutine停止"</span>)</span><br><span class="line">    cancel()</span><br><span class="line">    <span class="comment">//为了检测监控过是否停止，如果没有输出，就表示停止了</span></span><br><span class="line">    time.Sleep(<span class="number">5</span> * time.Second)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这段代码几乎和chan+select的方式没有多少区别,简单易懂.看不出有什么先进之处.我们来看下多goroutine的场景.</p>
+<blockquote>
+<p>Context控制多个goroutine</p>
+</blockquote>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">    ctx, cancel := context.WithCancel(context.Background())</span><br><span class="line">    <span class="keyword">go</span> watch(ctx,<span class="string">"运行1"</span>)</span><br><span class="line">    <span class="keyword">go</span> watch(ctx,<span class="string">"运行2"</span>)</span><br><span class="line">    <span class="keyword">go</span> watch(ctx,<span class="string">"运行3"</span>)</span><br><span class="line"></span><br><span class="line">    time.Sleep(<span class="number">10</span> * time.Second)</span><br><span class="line">    fmt.Println(<span class="string">"通知goroutine停止"</span>)</span><br><span class="line">    cancel()</span><br><span class="line">    <span class="comment">//为了检测监控过是否停止，如果没有监控输出，就表示停止了</span></span><br><span class="line">    time.Sleep(<span class="number">5</span> * time.Second)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">watch</span><span class="params">(ctx context.Context, name <span class="keyword">string</span>)</span></span> &#123;</span><br><span class="line">    <span class="keyword">for</span> &#123;</span><br><span class="line">        <span class="keyword">select</span> &#123;</span><br><span class="line">        <span class="keyword">case</span> &lt;-ctx.Done():</span><br><span class="line">            fmt.Println(name,<span class="string">" 外部发来信号,停止循环......"</span>)</span><br><span class="line">            <span class="keyword">return</span></span><br><span class="line">        <span class="keyword">default</span>:</span><br><span class="line">            fmt.Println(name,<span class="string">"goroutine运行中..."</span>)</span><br><span class="line">            time.Sleep(<span class="number">2</span> * time.Second)</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>看到没,3个goroutine就使用了一个context来控制.这是比chan+select优雅的地方.如果你的每个goroutine都要分开停止那么你还是免不了使用多个context.</p>
+<h2 id="Context接口"><a href="#Context接口" class="headerlink" title="Context接口"></a>Context接口</h2><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> Context <span class="keyword">interface</span> &#123;</span><br><span class="line">    Deadline() (deadline time.Time, ok <span class="keyword">bool</span>)</span><br><span class="line">    Done() &lt;-<span class="keyword">chan</span> <span class="keyword">struct</span>&#123;&#125;</span><br><span class="line">    Err() error</span><br><span class="line">    Value(key <span class="keyword">interface</span>&#123;&#125;) <span class="keyword">interface</span>&#123;&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Deadline</td>
+<td>获取设置的截止时间的意思，第一个返回式是截止时间，到了这个时间点，Context会自动发起取消请求；第二个返回值为false时表示没有设置截止时间，如果需要取消的话，需要调用取消函数进行取消</td>
+</tr>
+<tr>
+<td>Done</td>
+<td>返回一个只读的chan，类型为struct{}，我们在goroutine中，如果该方法返回的chan可以读取，则意味着parent context已经发起了取消请求，我们通过Done方法收到这个信号后，就应该做清理操作，然后退出</td>
+</tr>
+<tr>
+<td>Err</td>
+<td>返回取消的错误原因，因为什么Context被取消</td>
+</tr>
+<tr>
+<td>Value</td>
+<td>获取该Context上绑定的值，是一个键值对，所以要通过一个Key才可以获取对应的值，这个值一般是线程安全的</td>
+</tr>
+</tbody></table>
+<h2 id="Context使用"><a href="#Context使用" class="headerlink" title="Context使用"></a>Context使用</h2><p>Context接口并不需要我们实现，Go内置已经帮我们实现了2个，我们代码中最开始都是以这两个内置的作为最顶层的partent context，衍生出更多的子Context。</p>
+<p>一个是Background，主要用于main函数、初始化以及测试代码中，作为Context这个树结构的最顶层的Context，也就是根Context。</p>
+<p>一个是TODO,它目前还不知道具体的使用场景，如果我们不知道该使用什么Context的时候，可以使用这个。</p>
+<h2 id="Context的继承衍生"><a href="#Context的继承衍生" class="headerlink" title="Context的继承衍生"></a>Context的继承衍生</h2><p>有了如上的根Context，那么是如何衍生更多的子Context的呢？这就要靠context包为我们提供的With系列的函数了。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WithCancel</span><span class="params">(parent Context)</span> <span class="params">(ctx Context, cancel CancelFunc)</span></span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WithDeadline</span><span class="params">(parent Context, deadline time.Time)</span> <span class="params">(Context, CancelFunc)</span></span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WithTimeout</span><span class="params">(parent Context, timeout time.Duration)</span> <span class="params">(Context, CancelFunc)</span></span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WithValue</span><span class="params">(parent Context, key, val <span class="keyword">interface</span>&#123;&#125;)</span> <span class="title">Context</span></span></span><br></pre></td></tr></table></figure>
+
+<h2 id="Context-使用原则"><a href="#Context-使用原则" class="headerlink" title="Context 使用原则"></a>Context 使用原则</h2><ol>
+<li>不要把Context放在结构体中，要以参数的方式传递</li>
+<li>Context作为参数的函数方法，应该把Context作为第一个参数</li>
+<li>给一个函数方法传递Context的时候，不要传递nil，如果不知道传递什么，就使用context.TODO</li>
+<li>Context的Value相关方法应该传递必须的数据，不要什么数据都使用这个传递</li>
+<li>Context是线程安全的，可以放心的在多个goroutine中传递,但是WithValue的value要自己保证是线程安全的</li>
+</ol>
+]]></content>
+      <categories>
+        <category>go</category>
+        <category>chromedp</category>
+      </categories>
+      <tags>
+        <tag>golang</tag>
+        <tag>go</tag>
+        <tag>context</tag>
+        <tag>WaitGroup</tag>
+        <tag>select</tag>
+        <tag>chan</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Hello World</title>
+    <url>/2020/01/13/hello-world/</url>
+    <content><![CDATA[<p>Welcome to <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a>! This is your very first post. Check <a href="https://hexo.io/docs/" target="_blank" rel="noopener">documentation</a> for more info. If you get any problems when using Hexo, you can find the answer in <a href="https://hexo.io/docs/troubleshooting.html" target="_blank" rel="noopener">troubleshooting</a> or you can ask me on <a href="https://github.com/hexojs/hexo/issues" target="_blank" rel="noopener">GitHub</a>.</p>
+<a id="more"></a>
+<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo new <span class="string">"My New Post"</span></span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/writing.html" target="_blank" rel="noopener">Writing</a></p>
+<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo server</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/server.html" target="_blank" rel="noopener">Server</a></p>
+<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo generate</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/generating.html" target="_blank" rel="noopener">Generating</a></p>
+<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo deploy</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/one-command-deployment.html" target="_blank" rel="noopener">Deployment</a></p>
+]]></content>
+  </entry>
+</search>
